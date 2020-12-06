@@ -7,5 +7,4 @@ udonarium用デッキ作成支援ツール
 ・udonariumに読み込み可能な.zip形式の出力。  
 ![01_re_off](https://user-images.githubusercontent.com/52814019/101282854-bca27280-381a-11eb-99b3-ee6f78d61e6c.jpg)
 
-詳細はファイル内の「使用説明」を読んでください。
-
+ツール使うだけなら、「deckMaker4udon_v???.zip」のファイル内の「使用説明」を読んで使えば問題ないはず。  
