@@ -3,6 +3,19 @@ import cv2
 from matplotlib import pyplot as plt
 # import math
 
+DEB_DIR = "img_debug"
+IN_DIR = "img_in"
+OUT_DIR = "img_out"
+
+IN_FIL = "01.jpg"
+# IN_FIL = "image0 (1).jpg"
+# IN_FIL = "image0 (2).jpg"
+# IN_FIL = "image0.jpg"
+# IN_FIL = "rf.jpg"
+# IN_FIL = "rf_rot.jpg"
+# IN_FIL = "yabaiare1.jpg"
+
+
 # def histogram_equalization(img):
 #     hist,bins = np.histogram(img.flatten(),256,[0,256])
 #     cdf = hist.cumsum()
@@ -37,7 +50,6 @@ from matplotlib import pyplot as plt
 #     return False
 
 def crop_minAreaRect(img, rect):
-
     # rotate img
     angle = rect[2]
     rows,cols = img.shape[0], img.shape[1]
@@ -58,19 +70,37 @@ def crop_minAreaRect(img, rect):
 
     return img_crop
 
+# def calc_outcard_size(contours):
+#     ''' 出力画像のサイズ計算'''
+#     cnt = contours[0]
+#     rect = cv2.minAreaRect(cnt)
+#     h, w = rect[1]
+#     return int(h), int(w)
+
 def calc_outcard_size(contours):
     ''' 出力画像のサイズ計算'''
-    cnt = contours[0]
-    rect = cv2.minAreaRect(cnt)
-    h, w = rect[1]
-    return int(h), int(w)
+    min_l = cv2.arcLength(contours[0],True)
+    rect = cv2.minAreaRect(contours[0])
+    h_star, w_star = rect[1]
+    for i, cnt in enumerate(contours):
+        rect = cv2.minAreaRect(cnt)
+        h, w = rect[1]
+        length = cv2.arcLength(cnt, True)
+        tmp = abs((h+w) - length/2)
+        if tmp < min_l:
+            min_l = tmp
+            h_star = h
+            w_star = w
+        if i > 5:
+            break
+    return int(h_star), int(w_star)
 
 def my_pad(img):
     size = img.shape
     if len(size) == 2:
         h, w = size
         lens = max([h,w])
-        tmp = np.pad(img, [((lens-h)//2, (lens-h)//2),((lens-w)//2, (lens-w)//2)], 'edge')
+        tmp = np.pad(img, [((lens-h)//2, (lens-h)//2), ((lens-w)//2, (lens-w)//2)], 'edge')
     else:
         h, w = size[:2]
         lens = max([h,w])
@@ -112,22 +142,42 @@ def make_mask_at(gray):
 
     thresh_org = thresh.copy() #デバッグ画像用
 
-    for y in range(h):
+    for y in [0, h-1]:
         for x in range(w):
-            if thresh[x,y] != 0:
-                thresh = cv2.floodFill(image=thresh, mask=None, seedPoint = (x,y), newVal=0,flags=4)[1]
+
+            if thresh[y, x] != 0:
+                thresh = cv2.floodFill(image=thresh, mask=None, seedPoint = (y,x), newVal=0,flags=4)[1]
                 break
         else:
             continue
         break
-    cv2.imwrite(f"bw.jpg", np.hstack([thresh_org,thresh]))
+
+    cv2.imwrite(f"{DEB_DIR}/bw.jpg", np.hstack([thresh_org,thresh]))
     return thresh
+
+def select_usable_contours(contours):
+    """ 面積が一番大きい輪郭のn分の1以上で、四角に線形補間可能な輪郭とその近似線（aprrox）を返す
+    """
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    res_cnt = []
+    res_approx = []
+    base_area = cv2.contourArea(contours[0])/10
+    for i, cnt in enumerate(contours):
+        a = cv2.contourArea(cnt)
+
+        # 輪郭を凸形で近似
+        epsilon = 0.05 * cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+
+        if len(approx) == 4 and a>base_area:
+            res_cnt.append(cnt)
+            res_approx.append(approx)     
+    return res_cnt, res_approx
+
 
 def main():
     # 画像読み込み
-    # img = cv2.imread('image0.jpg')
-    # img = cv2.imread('image0 (2).jpg')
-    img = cv2.imread('rf.jpg')
+    img = cv2.imread(f'{IN_DIR}/{IN_FIL}')
 
     # 雑音除去
     # img = cv2.medianBlur(img,5)
@@ -139,8 +189,8 @@ def main():
 
     # flag, thresh = cv2.threshold(gray, luminance_threshold(gray), 255, cv2.THRESH_BINARY)
     # thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
-    thresh = make_mask_at(gray) # 適応的しきい値処理による二値化、影の映り込みにロバストs
-    # cv2.imwrite(f"bw.jpg", thresh)
+    thresh = make_mask_at(gray) # 適応的しきい値処理による二値化、影の映り込みにロバスト
+    # cv2.imwrite(f"{DEB_DIR}/bw.jpg", thresh)
     # cv2.imshow("bw",thresh)
     # cv2.waitKey(0)
 
@@ -150,62 +200,44 @@ def main():
 
     # Find contours
     contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True) 
-    # contours = sorted(contours, key=cv2.arcLength, reverse=True) 
-
-    # Select long perimeters only
-    perimeters = [cv2.contourArea(contours[i]) for i in range(len(contours))]
-    # cv2.imshow("perim",perimeters[0])
-    # cv2.waitKey(0)
-    listindex=[i for i in range(len(perimeters)) if perimeters[i]>perimeters[0]/10]
-
-
     # Show image
     imgcont = img.copy()
-    [cv2.drawContours(imgcont, [contours[i]], 0, (0,255,0), 5) for i in listindex]
-    # plt.imshow(imgcont)
-    # plt.show()
-    cv2.imwrite(f"frame.jpg", imgcont)
+    
+    # deb: 抽出されたすべての輪郭を赤で表示
+    [cv2.drawContours(imgcont, [cnt], 0, (0,0,255), 8) for cnt in contours]
+    cv2.imwrite(f"{DEB_DIR}/frame.jpg", imgcont)
+    
+    # 条件を満たしたcontorsのindexのみを選出
+    contours, approxes = select_usable_contours(contours)
+
+    # deb: 条件を満たす輪郭とその近似線を、緑と青で表示
+    [cv2.drawContours(imgcont, [cnt], 0, (0,255,0), 8) for cnt in contours]
+    [cv2.drawContours(imgcont, [a], 0, (255, 0, 0), 8) for a in approxes]
+    cv2.imwrite(f"{DEB_DIR}/frame.jpg", imgcont)
+
+    # 条件を満たす輪郭がない場合は処理を終了する
+    if len(contours) == 0:
+        print("MyError:切り取れるカードがありません。debugフォルダを確認して下さい。")
+        return -1
 
     # 出力画像のサイズ計算
     card_img_height, card_img_width= calc_outcard_size(contours)
 
     num = 0
-    for i, ind in enumerate(listindex):
-        cnt = contours[ind]
-        rect = cv2.minAreaRect(cnt)
-
-        ###############矩形近似＆射影変換#################
-        # 輪郭を凸形で近似
-        epsilon = 0.05 * cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, epsilon, True)
-        imghull = img.copy()
-        cv2.drawContours(imghull, [approx], 0, (255,0,0), 10)
-        plt.imshow(imghull)
-        # plt.show()
-
-        # カードの横幅　# for分の外に移行
-        # card_img_width = 1600 # 適当な値
-        # card_img_height = 2400 # 適当な値
-
-        src = np.float32(list(map(lambda x: x[0], approx[:4,...])))
+    for approx in approxes:
+        src = np.float32(list(map(lambda x: x[0], approx)))
         src = sort_points(src,img)
         dst = np.float32([[0,0],[0,card_img_height],[card_img_width,card_img_height],[card_img_width,0]])
 
-        projectMatrix = cv2.getPerspectiveTransform(src, dst)
-
-        res = cv2.warpPerspective(img, projectMatrix, (card_img_width, card_img_height),flags=cv2.INTER_CUBIC)
+        ###############射影変換#################
+        project_matrix = cv2.getPerspectiveTransform(src, dst)
+        res = cv2.warpPerspective(img, project_matrix, (card_img_width, card_img_height),flags=cv2.INTER_CUBIC)
         #########################################
 
         if res.size != 0:
-                cv2.imwrite(f"out/out{num}.jpg", res)
-                # cv2.imwrite(f"out/out_d{i}.jpg", res)
+                cv2.imwrite(f"{OUT_DIR}/out{num}.jpg", res)
                 num = num + 1
         else:
             continue
-
-        # canny = cv2.Canny(res, 100, 200)
-        # cv2.imwrite(f"canny{i}.jpg", canny)
-
 if __name__ == "__main__":
     main()
